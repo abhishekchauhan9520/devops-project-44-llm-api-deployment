@@ -1,0 +1,9 @@
+.git
+.github
+__pycache__
+*.pyc
+.env*
+tests
+README.md
+k8s
+monitoring
