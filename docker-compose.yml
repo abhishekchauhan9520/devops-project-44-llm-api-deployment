@@ -1,0 +1,19 @@
+services:
+  llm-api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      LLM_PROVIDER: mock
+      REQUIRE_API_KEY: "true"
+      SERVICE_API_KEY: ${SERVICE_API_KEY:?set SERVICE_API_KEY}
+      RATE_LIMIT_RPM: "60"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 100
+    restart: unless-stopped
