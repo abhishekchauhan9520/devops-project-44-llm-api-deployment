@@ -3,10 +3,13 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from .metrics import record_request, render_prometheus
 from .providers import LLMProvider, MockProvider, OpenAIProvider
+from .security import allow_request
 
 app = FastAPI(title="Production LLM API", version="1.0.0")
 
@@ -14,7 +17,6 @@ MAX_PROMPT_CHARS = int(os.getenv("MAX_PROMPT_CHARS", "12000"))
 MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", "1024"))
 REQUIRE_API_KEY = os.getenv("REQUIRE_API_KEY", "true").lower() == "true"
 SERVICE_API_KEY = os.getenv("SERVICE_API_KEY")
-
 _PROVIDER: LLMProvider | None = None
 
 
@@ -54,6 +56,16 @@ def authorize(x_api_key: str | None) -> None:
         raise HTTPException(status_code=401, detail="invalid API key")
 
 
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    identity = request.headers.get("x-client-id")
+    if not identity:
+        identity = request.client.host if request.client else "unknown"
+    if request.url.path.startswith("/v1/") and not allow_request(identity):
+        return PlainTextResponse("rate limit exceeded", status_code=429)
+    return await call_next(request)
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -68,13 +80,24 @@ def ready() -> dict[str, str]:
     return {"status": "ready"}
 
 
+@app.get("/metrics", response_class=PlainTextResponse)
+def metrics() -> str:
+    return render_prometheus()
+
+
 @app.post("/v1/chat", response_model=ChatResponse)
 def chat(request: ChatRequest, x_api_key: str | None = Header(default=None)) -> ChatResponse:
     authorize(x_api_key)
     request_id = str(uuid.uuid4())
     started = time.perf_counter()
-    result = provider().chat(request.prompt, request.model, request.max_output_tokens, request.temperature)
+    try:
+        result = provider().chat(request.prompt, request.model, request.max_output_tokens, request.temperature)
+    except Exception:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        record_request(request.model or os.getenv("OPENAI_MODEL", "unknown"), latency_ms, True, {})
+        raise
     latency_ms = int((time.perf_counter() - started) * 1000)
+    record_request(result.model, latency_ms, False, result.usage)
     return ChatResponse(
         request_id=request_id,
         model=result.model,
