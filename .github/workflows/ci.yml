@@ -23,6 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: pip install pyyaml
       - name: Validate Kubernetes YAML
         run: |
           python - <<'PY'
@@ -38,7 +42,15 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: llm-api:${{ github.sha }}
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: llm-api:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+          ignore-unfixed: true
+          exit-code: '1'
 
   security:
     runs-on: ubuntu-latest
