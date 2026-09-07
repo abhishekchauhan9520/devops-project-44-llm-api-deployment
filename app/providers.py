@@ -55,12 +55,12 @@ class OpenAIProvider:
             raise RuntimeError("missing provider credentials")
 
     def chat(self, prompt: str, model: str | None, max_output_tokens: int, temperature: float) -> LLMResult:
+        del temperature
         selected_model = model or self.default_model
         response = self.client.responses.create(
             model=selected_model,
             input=prompt,
             max_output_tokens=max_output_tokens,
-            temperature=temperature,
         )
         usage_obj = getattr(response, "usage", None)
         usage = {
